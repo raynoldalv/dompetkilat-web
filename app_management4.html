@@ -360,8 +360,11 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content border-0">
                 <div class="modal-body">
-                    <h5 class="fw-bold mb-3">Statistik</h5>
-                    <canvas id="chartMingguan"></canvas>
+                    <h5 class="fw-bold mb-3">Statistik Pengeluaran</h5>
+                    <p class="small text-muted" id="chart-period-label">Minggu Ini</p>
+                    <div style="position: relative; height: 300px;">
+                        <canvas id="chartMingguan"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -396,6 +399,7 @@
         
         updateUI();
 
+        // 1. INPUT TRANSAKSI
         document.getElementById('form-transaksi').addEventListener('submit', function(e) {
             e.preventDefault();
             const nominal = parseInt(document.getElementById('inputNominal').value);
@@ -409,13 +413,12 @@
             }
         });
 
-        function updateUI() {
+        // 2. FUNGSI FILTER DATA (REUSABLE)
+        function getFilteredData() {
             const filterType = document.getElementById('timeFilter').value;
-            const listEl = document.getElementById('list-transaksi');
-            const totalEl = document.getElementById('total-display');
             const now = new Date();
             
-            let filteredData = dataTransaksi.filter(t => {
+            return dataTransaksi.filter(t => {
                 const tDate = new Date(t.tanggal);
                 if (filterType === 'mingguan') {
                     const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -426,11 +429,21 @@
                     return tDate.getFullYear() === now.getFullYear();
                 }
             });
+        }
+
+        // 3. UPDATE UI UTAMA
+        function updateUI() {
+            const listEl = document.getElementById('list-transaksi');
+            const totalEl = document.getElementById('total-display');
+            
+            // Gunakan fungsi filter yang sama
+            let filteredData = getFilteredData();
 
             const total = filteredData.reduce((sum, t) => sum + t.nominal, 0);
             totalEl.innerText = 'Rp ' + total.toLocaleString('id-ID');
 
             listEl.innerHTML = '';
+            // Sort Descending (Terbaru diatas)
             filteredData.sort((a, b) => new Date(b.tanggal) - new Date(a.tanggal)).slice(0, 10).forEach(t => {
                 const d = new Date(t.tanggal);
                 listEl.innerHTML += `
@@ -546,18 +559,85 @@
             }
         });
 
+        // --- CHART JS FUNGSIONAL (Updated) ---
         let myChart;
-        function renderChart(){
+        function renderChart() {
              const ctx = document.getElementById('chartMingguan');
+             
+             // 1. Ambil data sesuai filter yang aktif
+             const filteredData = getFilteredData();
+             const filterLabel = document.getElementById('timeFilter').options[document.getElementById('timeFilter').selectedIndex].text;
+             document.getElementById('chart-period-label').innerText = "Periode: " + filterLabel;
+
+             if (filteredData.length === 0) {
+                 // Jika data kosong, tampilkan chart kosong atau pesan
+                 if(myChart) myChart.destroy();
+                 myChart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Belum Ada Data'],
+                        datasets: [{ data: [1], backgroundColor: ['#e9ecef'] }]
+                    },
+                    options: { plugins: { legend: { display: false } } }
+                 });
+                 return;
+             }
+
+             // 2. Kelompokkan Data per Kategori
+             const categoryTotals = {};
+             filteredData.forEach(t => {
+                 if (categoryTotals[t.kategori]) {
+                     categoryTotals[t.kategori] += t.nominal;
+                 } else {
+                     categoryTotals[t.kategori] = t.nominal;
+                 }
+             });
+
+             // 3. Siapkan Data untuk ChartJS
+             const labels = Object.keys(categoryTotals);
+             const dataValues = Object.values(categoryTotals);
+             
+             // Warna Statis untuk Kategori agar konsisten
+             const categoryColors = {
+                 'Makan': '#ff6384',      // Merah Muda
+                 'Transport': '#36a2eb',  // Biru
+                 'Belanja': '#ffcd56',    // Kuning
+                 'Tagihan': '#4bc0c0',    // Teal
+                 'Lainnya': '#9966ff'     // Ungu
+             };
+             const backgroundColors = labels.map(cat => categoryColors[cat] || '#c9cbcf');
+
              if(myChart) myChart.destroy();
+             
              myChart = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
-                    labels: ['Terpakai', 'Sisa Budget'],
+                    labels: labels,
                     datasets: [{
-                        data: [1, 1], 
-                        backgroundColor: [getComputedStyle(document.body).getPropertyValue('--primary'), '#eee']
+                        data: dataValues,
+                        backgroundColor: backgroundColors,
+                        borderWidth: 2,
+                        hoverOffset: 10
                     }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.label || '';
+                                    if (label) { label += ': '; }
+                                    if (context.parsed !== null) {
+                                        label += new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(context.parsed);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
                 }
              });
         }
